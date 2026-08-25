@@ -143,7 +143,7 @@ class Classifier(nn.Module):
 if __name__ == "__main__":
     x = torch.rand([1, 8, 256, 256]).to(torch.device("cuda:0"))
 
-    u_net = Classifier(channel_in=8).to(torch.device("cuda:0"))
+    model = Classifier(channel_in=8).to(torch.device("cuda:0"))
 
     with torch.no_grad():
-        out = u_net(x)
+        out = model(x)
