@@ -8,8 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torchaudio.prototype.transforms as PT
 import torchaudio.transforms as T
+try:
+    import torchaudio.prototype.transforms as PT
+except (ModuleNotFoundError, ImportError):
+    PT = None
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
@@ -324,7 +327,7 @@ if __name__ == "__main__":
     for i, data in tqdm(enumerate(train_dataloader), total=len(train_dataloader)):
         spectrograms, labels = data
         print(f"Spectrograms shape: {spectrograms.shape}")  # Expected shape: [1, 8, 128, 256]
-        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 5]
+        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 6]
         print(f"Labels: {labels}")
         plot_spectrograms(spectrograms)
         print(f"Max value: {torch.max(spectrograms)}, Min value: {torch.min(spectrograms)}")
@@ -335,7 +338,7 @@ if __name__ == "__main__":
     for i, data in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
         spectrograms, labels = data
         print(f"Spectrograms shape: {spectrograms.shape}")  # Expected shape: [1, 8, 128, 256]
-        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 5]
+        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 6]
         print(f"Labels: {labels}")
         plot_spectrograms(spectrograms)
         print(f"Max value: {torch.max(spectrograms)}, Min value: {torch.min(spectrograms)}")
