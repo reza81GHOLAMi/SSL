@@ -1,0 +1,35 @@
+# Python virtual environment
+env/
+venv/
+.venv/
+
+# PyCharm / IDE
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# WandB
+wandb/
+wandb-debug.log
+
+# Model checkpoints & large outputs
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Audio files (dataset is on Zenodo)
+*.wav
+*.mp3
+*.flac
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
