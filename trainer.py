@@ -136,7 +136,8 @@ class Trainer:
             self.scaler.step(self.opt_Segm)
             self.scaler.update()
 
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc_interval = self.cfg.get("gc_collect_interval", 0)
             if gc_interval > 0 and iteration % gc_interval == 0:
                 gc.collect()
