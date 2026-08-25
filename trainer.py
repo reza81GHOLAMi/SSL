@@ -126,7 +126,7 @@ class Trainer:
 
             self.opt_Segm.zero_grad()
             with torch.cuda.amp.autocast(enabled=self.cfg.get("use_amp", False)):
-                out = self.segmentate(input_spec_tensor).squeeze()
+                out = self.segmentate(input_spec_tensor)
 
             Loss = self.compute_loss(out, mask)
 
@@ -170,7 +170,7 @@ class Trainer:
         with torch.no_grad():
             for iteration, data in enumerate(tqdm(self.test_loader, desc=f"Testing Epoch {epoch + 1}")):
                 input_spec_tensor, mask = (tensor.to(self.cfg["device"]).float() for tensor in data)
-                out = self.segmentate(input_spec_tensor).squeeze()
+                out = self.segmentate(input_spec_tensor)
                 loss = self.compute_loss(out, mask)
                 batch_size = input_spec_tensor.size(0)
                 test_loss_total += loss.item() * batch_size
