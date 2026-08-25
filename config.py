@@ -23,6 +23,7 @@ config = {
     "use_amp": False,
     "use_grad": False,
     "cooldown_seconds": 0,
+    "num_workers": 2,
 
     # FEATURES
     "sample_rate": 44100,

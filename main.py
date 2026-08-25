@@ -22,8 +22,8 @@ def train_init(rank, cfg):
     print("Data loading")
     dataset_train = AudioSpectrogramDataset(cfg, mode="train")
     dataset_test = AudioSpectrogramDataset(cfg, mode="test")
-    training_loader = DataLoader(dataset_train, cfg["batch_size"], shuffle=True, drop_last=True, num_workers=2)
-    test_loader = DataLoader(dataset_test, cfg["batch_size"], shuffle=False, drop_last=True, num_workers=2)
+    training_loader = DataLoader(dataset_train, cfg["batch_size"], shuffle=True, drop_last=True, num_workers=cfg.get("num_workers", 2))
+    test_loader = DataLoader(dataset_test, cfg["batch_size"], shuffle=False, drop_last=True, num_workers=cfg.get("num_workers", 2))
 
     print("Models initializaing")
     trainer = Trainer(cfg, training_loader, test_loader)
