@@ -136,11 +136,12 @@ def summarize_post_metadata(base_folder_path):
                 # Parse metadata from folder names (e.g., 10_20_45_1 or none_none_none_none_2)
                 folder_parts = folder_name.split('_')
                 if len(folder_parts) >= 4:
-                    azimuth, height, rotation, movement = folder_parts[:4]
+                    distance, height, azimuth, side = folder_parts[:4]
 
-                    metadata_summary[dataset_type]['azimuths'][azimuth] += 1
+                    metadata_summary[dataset_type]['distances'][distance] += 1
                     metadata_summary[dataset_type]['heights'][height] += 1
-                    metadata_summary[dataset_type]['rotations'][rotation] += 1
+                    metadata_summary[dataset_type]['azimuths'][azimuth] += 1
+                    metadata_summary[dataset_type]['sides'][side] += 1
 
     for dataset_type, summary in metadata_summary.items():
         print(f"\nSummary of Metadata for {dataset_type.capitalize()}:")
