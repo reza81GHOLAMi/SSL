@@ -149,12 +149,6 @@ def summarize_post_metadata(base_folder_path):
             for value, count in counter.items():
                 print(f"  {value}: {count}")
 
-    print("Summary of Metadata:")
-    for key, counter in metadata_summary.items():
-        print(f"{key.capitalize()}:")
-        for value, count in counter.items():
-            print(f"  {value}: {count}")
-
 def divide_files_to_new_structure(base_folder_path, new_base_path, step_train=500, clip_duration_train=1500, clip_duration_test=1000, total_clips_test=20):
     for dataset_type in ['train', 'test']:
         dataset_path = os.path.join(base_folder_path, dataset_type)
