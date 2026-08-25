@@ -24,6 +24,7 @@ config = {
     "use_grad": False,
     "cooldown_seconds": 0,
     "num_workers": 2,
+    "gc_collect_interval": 0,
 
     # FEATURES
     "sample_rate": 44100,

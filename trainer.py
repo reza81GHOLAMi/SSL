@@ -137,7 +137,9 @@ class Trainer:
             self.scaler.update()
 
             torch.cuda.empty_cache()
-            _ = gc.collect()
+            gc_interval = self.cfg.get("gc_collect_interval", 0)
+            if gc_interval > 0 and iteration % gc_interval == 0:
+                gc.collect()
 
             # Updating the loss buffer
             avg_loss = self.update_loss_buffer(Loss.item())
