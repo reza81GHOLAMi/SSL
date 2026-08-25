@@ -1,6 +1,6 @@
 config = {
     # Dataset
-    "dataset_path": "D:\divided_datasets",
+    "dataset_path": r"D:\divided_datasets",
     "height": 256,
     "width": 256,
 
