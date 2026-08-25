@@ -275,10 +275,7 @@ class AudioSpectrogramDataset(Dataset):
         # Converting to tensors
         spectrograms = torch.tensor(spectrograms_np, dtype=torch.float32)  # Shape: [8, height, width]
 
-        if self.mode == 'train':
-            return spectrograms, labels_tensor
-        else:
-            return spectrograms, labels_tensor  # Returning spectrograms and labels in test mode
+        return spectrograms, labels_tensor
 
 def plot_spectrograms(spectrograms, num_channels=8, rows=2, cols=4):
     """
