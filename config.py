@@ -22,6 +22,7 @@ config = {
     "gpu_num": 0,
     "use_amp": False,
     "use_grad": False,
+    "cooldown_seconds": 0,
 
     # FEATURES
     "sample_rate": 44100,

@@ -80,5 +80,7 @@ if __name__ == "__main__":
         args, unknown = parser.parse_known_args()
         main(args, updated_config)
 
-        print("Cooling down GPU...")
-        time.sleep(180)  # Sleep for 3 minutes before the next run
+        cooldown = updated_config.get("cooldown_seconds", 0)
+        if cooldown > 0:
+            print(f"Cooling down for {cooldown} seconds...")
+            time.sleep(cooldown)
