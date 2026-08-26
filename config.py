@@ -1,6 +1,9 @@
 config = {
     # Dataset
     "dataset_path": r"D:\divided_datasets",
+    "base_folder_path": r"D:\microphone_array",
+    "processed_path": r"D:\processed_datasets",
+    "divided_path": r"D:\divided_datasets",
     "height": 256,
     "width": 256,
 

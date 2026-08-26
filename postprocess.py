@@ -4,15 +4,16 @@ import random
 from collections import defaultdict, Counter
 
 from pydub import AudioSegment
+from config import config
 
-# Path to the base directory containing multiple folders with label.json and output.wav
-base_folder_path = r"D:\microphone_array"
-processed_path = r"D:\processed_datasets"
-divided_path = r"D:\divided_datasets"
+# Paths configurable via config.py
+base_folder_path = config.get("base_folder_path", r"D:\microphone_array")
+processed_path = config.get("processed_path", r"D:\processed_datasets")
+divided_path = config.get("divided_path", r"D:\divided_datasets")
 
-# Base output directories for train and test datasets
-train_base_dir = r"D:\processed_datasets\train"
-test_base_dir = r"D:\processed_datasets\test"
+# Derived output directories for train and test datasets
+train_base_dir = os.path.join(processed_path, "train")
+test_base_dir = os.path.join(processed_path, "test")
 os.makedirs(train_base_dir, exist_ok=True)
 os.makedirs(test_base_dir, exist_ok=True)
 
