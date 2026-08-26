@@ -42,7 +42,10 @@ class Trainer:
 
         self.loader = loader
         self.test_loader = test_loader
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.cfg["use_grad"])
+        if torch.cuda.is_available():
+            self.scaler = torch.amp.GradScaler('cuda', enabled=self.cfg.get("use_grad", False))
+        else:
+            self.scaler = None
 
         self.segmentate = Classifier(channel_in=8).to(self.cfg["device"])
 
@@ -61,7 +64,8 @@ class Trainer:
                 checkpoint = torch.load(self.cfg[f"model_path"])
                 self.segmentate.load_state_dict(checkpoint["classifier_state_dict"])
                 self.opt_Segm.load_state_dict(checkpoint["optimizer_state_dict"])
-                self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+                if self.scaler is not None:
+                    self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
                 self.epoch = checkpoint["epoch"]
 
             except FileNotFoundError as e:
@@ -101,7 +105,7 @@ class Trainer:
         else:
             model_state_dict_enc = classifier.state_dict()
         torch.save({"epoch": EPOCH, "classifier_state_dict": model_state_dict_enc, "config": self.cfg,
-            "optimizer_state_dict": optimizer.state_dict(), "scaler_state_dict": scaler.state_dict()
+            "optimizer_state_dict": optimizer.state_dict(), "scaler_state_dict": scaler.state_dict() if scaler is not None else None
         }, PATH, )
 
     def update_loss_buffer(self, loss):
@@ -131,10 +135,14 @@ class Trainer:
             Loss = self.compute_loss(out, mask)
 
             # Backpropagation and optimization
-            self.scaler.scale(Loss).backward()
-            self.scaler.unscale_(self.opt_Segm)
-            self.scaler.step(self.opt_Segm)
-            self.scaler.update()
+            if self.scaler is not None:
+                self.scaler.scale(Loss).backward()
+                self.scaler.unscale_(self.opt_Segm)
+                self.scaler.step(self.opt_Segm)
+                self.scaler.update()
+            else:
+                Loss.backward()
+                self.opt_Segm.step()
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
