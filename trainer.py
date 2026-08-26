@@ -53,7 +53,7 @@ class Trainer:
         self.opt_Segm = optim.Adam(list(self.segmentate.parameters()), lr=self.cfg["lr"], betas=(0.5, 0.9), )
 
         self.loss_buffer = []
-        self.scheduler = ReduceLROnPlateau(self.opt_Segm, 'max', patience=20000, factor=0.9, min_lr=0.000001)
+        self.scheduler = ReduceLROnPlateau(self.opt_Segm, 'min', patience=self.cfg.get("lr_patience", 10), factor=0.9, min_lr=0.000001)
 
         self.len_loader = len(loader)
         self.epoch = 0
