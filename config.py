@@ -29,6 +29,8 @@ config = {
     "num_workers": 2,
     "gc_collect_interval": 0,
     "lr_patience": 10,
+    "test_split_ratio": 0.25,
+    "split_seed": 42,
 
     # FEATURES
     "sample_rate": 44100,

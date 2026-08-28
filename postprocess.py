@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import shutil
 from collections import defaultdict, Counter
 
 from pydub import AudioSegment
@@ -198,6 +199,95 @@ def divide_files_to_new_structure(base_folder_path, new_base_path, step_train=50
     print(f"New dataset structure created at: {new_base_path}")
 
 
+def split_recordings_by_folder(base_folder_path):
+    """Split recordings at the folder level (no data leakage).
+    Groups recordings by (distance, height, azimuth), randomly assigns
+    one recording per group to test, rest to train.
+    """
+    recordings = []
+    ambient_recordings = []
+
+    for raw_folder_name in os.listdir(base_folder_path):
+        folder_path = os.path.join(base_folder_path, raw_folder_name)
+        if not os.path.isdir(folder_path):
+            continue
+
+        label_path = os.path.join(folder_path, 'label.json')
+        wav_path = os.path.join(folder_path, 'output.wav')
+
+        if not (os.path.exists(label_path) and os.path.exists(wav_path)):
+            continue
+
+        with open(label_path, 'r', encoding='utf-8') as f:
+            label_data = json.load(f)
+
+        drone_data = label_data.get('drone', {})
+        sound_source = drone_data.get('sound_source', 'None')
+
+        if sound_source == 'Ambient Noise':
+            ambient_recordings.append((folder_path, wav_path))
+            continue
+
+        distance = drone_data.get('distance', 'none')
+        height = drone_data.get('height', 'none')
+        azimuth = drone_data.get('azimuth', 'none')
+        movement = drone_data.get('movement', 'Static').lower()
+
+        if movement == 'dynamic':
+            out_folder_name = f"{distance}_{height}_{azimuth}_dynamic"
+        else:
+            rotation = drone_data.get('rotation', 'Front')
+            side_map = {"front": 1, "left": 2, "back": 3, "right": 4}
+            side = side_map.get(rotation.lower() if rotation else 'none', 'none')
+            out_folder_name = f"{distance}_{height}_{azimuth}_{side}"
+
+        group_key = (distance, height, azimuth)
+        recordings.append({
+            'folder_path': folder_path,
+            'wav_path': wav_path,
+            'out_folder_name': out_folder_name,
+            'group_key': group_key,
+        })
+
+    groups = defaultdict(list)
+    for rec in recordings:
+        groups[rec['group_key']].append(rec)
+
+    random.seed(config.get("split_seed", 42))
+
+    train_count = 0
+    test_count = 0
+
+    for group_key, group_recordings in groups.items():
+        test_recording = random.choice(group_recordings)
+        train_recordings = [r for r in group_recordings if r != test_recording]
+
+        test_folder_name = get_unique_folder_name(test_base_dir, test_recording['out_folder_name'])
+        test_output_dir = os.path.join(test_base_dir, test_folder_name)
+        os.makedirs(test_output_dir, exist_ok=True)
+        shutil.copy2(test_recording['wav_path'], os.path.join(test_output_dir, "test_audio.wav"))
+        test_count += 1
+
+        for rec in train_recordings:
+            train_folder_name = get_unique_folder_name(train_base_dir, rec['out_folder_name'])
+            train_output_dir = os.path.join(train_base_dir, train_folder_name)
+            os.makedirs(train_output_dir, exist_ok=True)
+            shutil.copy2(rec['wav_path'], os.path.join(train_output_dir, "train_audio.wav"))
+            train_count += 1
+
+    for folder_path, wav_path in ambient_recordings:
+        train_folder_name = get_unique_folder_name(train_base_dir, "none_none_none_none")
+        train_output_dir = os.path.join(train_base_dir, train_folder_name)
+        os.makedirs(train_output_dir, exist_ok=True)
+        shutil.copy2(wav_path, os.path.join(train_output_dir, "train_audio.wav"))
+        train_count += 1
+
+    print(f"Recording-level split complete:")
+    print(f"  Train recordings: {train_count}")
+    print(f"  Test recordings: {test_count}")
+    print(f"  Total groups: {len(groups)}")
+    print(f"  Ambient (train only): {len(ambient_recordings)}")
+
 
 def main():
     print("What would you like to do?")
@@ -205,18 +295,19 @@ def main():
     print("2: Summarize after preprocess metadata")
     print("3: Process folders to% 75 and 25% length")
     print("4: Divide into small files")
-    choice = input("Enter your choice (1 or 2 or 3 or 4): ").strip()
+    print("5: Split recordings by folder (no data leakage)")
+    choice = input("Enter your choice (1-5): ").strip()
 
     if choice == "1":
         summarize_metadata(processed_path)
     elif choice == "2":
         summarize_post_metadata(processed_path)
     elif choice == "3":
-        # Run the processing function for all folders
         process_all_folders(base_folder_path)
     elif choice == "4":
-        # Run the processing function for all folders
         divide_files_to_new_structure(processed_path, divided_path)
+    elif choice == "5":
+        split_recordings_by_folder(base_folder_path)
     else:
         print("Invalid choice. Please run the script again.")
 
