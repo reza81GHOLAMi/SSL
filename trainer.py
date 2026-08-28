@@ -97,7 +97,7 @@ class Trainer:
             # Zapis checkpointa co 5 epok
             if (epoch + 1) % 5 == 0:
                 self.save_checkpoint(epoch + 1, self.segmentate, self.opt_Segm, self.scaler,
-                    f"{self.cfg['checkpoint_path']}/{epoch + 1}_end_unet.pth")
+                    f"{self.cfg.get('checkpoint_path', 'saved_models/default')}/{epoch + 1}_end_unet.pth")
 
     def save_checkpoint(self, EPOCH, classifier, optimizer, scaler, PATH):
         if isinstance(classifier, torch.nn.DataParallel):

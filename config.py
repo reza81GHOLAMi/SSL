@@ -32,6 +32,14 @@ config = {
     "test_split_ratio": 0.25,
     "split_seed": 42,
 
+    # Runtime defaults (overridden by main.py at startup)
+    "checkpoint_path": "saved_models/default",
+    "run_name": "default",
+    "wandb_project": "UAV-SSL",
+    "wandb_entity": "default",
+    "n_gpu": 0,
+    "rank": 0,
+
     # FEATURES
     "sample_rate": 44100,
     "n_mels": 128,
