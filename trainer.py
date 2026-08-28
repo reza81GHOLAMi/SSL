@@ -28,7 +28,7 @@ class Logger():
                     pass
             if data["Audio"]:
                 for key in data["Audio"]:
-                    data["Audio"][key] = wandb.Audio(data["Audio"][key], caption=key, sample_rate=16000)
+                    data["Audio"][key] = wandb.Audio(data["Audio"][key], caption=key, sample_rate=self.cfg["sample_rate"])
                 wandb.log(data["Audio"])
         if data["Print"]:
             print(data["Print"])
@@ -248,7 +248,7 @@ class Trainer:
         self.scheduler.step(avg_test_loss)
 
         # Logowanie wyników
-        data_to_log = {"Graph": {"Test_Loss": avg_test_loss, "Epoch": epoch, "MAE_a": mae_a, "RMSE_a": rmse_a, "MAE_b": mae_b, "RMSE_b": rmse_b,
+        data_to_log = {"Graph": {"Test_Loss": avg_test_loss, "MAE_a": mae_a, "RMSE_a": rmse_a, "MAE_b": mae_b, "RMSE_b": rmse_b,
             "MAE_c": mae_c, "RMSE_c": rmse_c, "MAE_d": mae_d, "RMSE_d": rmse_d},
             "Print": {"Test_Epoch": epoch + 1, "Test_Loss": avg_test_loss,  "MAE_a": mae_a,
                 "RMSE_a": rmse_a, "MAE_b": mae_b, "RMSE_b": rmse_b, "MAE_c": mae_c, "RMSE_c": rmse_c, "MAE_d": mae_d,
