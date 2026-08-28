@@ -53,7 +53,10 @@ def process_single_folder(folder_path):
             else:
                 rotation = drone_data.get('rotation', 'Front')
                 side_map = {"front": 1, "left": 2, "back": 3, "right": 4}
-                side = side_map.get(rotation.lower() if rotation else 'none', 'none')
+                side = side_map.get(rotation.lower() if rotation else 'none')
+                if side is None:
+                    print(f"  WARNING: Unknown rotation '{rotation}' in {folder_path}, skipping")
+                    return
                 folder_name = f"{distance}_{height}_{azimuth}_{side}"
 
         # Create unique train and test directories
@@ -238,7 +241,10 @@ def split_recordings_by_folder(base_folder_path):
         else:
             rotation = drone_data.get('rotation', 'Front')
             side_map = {"front": 1, "left": 2, "back": 3, "right": 4}
-            side = side_map.get(rotation.lower() if rotation else 'none', 'none')
+            side = side_map.get(rotation.lower() if rotation else 'none')
+            if side is None:
+                print(f"  WARNING: Unknown rotation '{rotation}' in {raw_folder_name}, skipping")
+                continue
             out_folder_name = f"{distance}_{height}_{azimuth}_{side}"
 
         group_key = (distance, height, azimuth)

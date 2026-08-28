@@ -195,7 +195,7 @@ class AudioSpectrogramDataset(Dataset):
                 c = float(c)
                 d = int(d)  # Assuming that 'd' is an integer
             except ValueError:
-                raise ValueError(f"Labels a, b, and c must be numeric, but received: a={a}, b={b}, c={c}")
+                raise ValueError(f"Labels must be numeric: a={a}, b={b}, c={c}, d={d}")
 
             # Transforming the value of 'c' (degrees) into sine and cosine
             c_rad = np.deg2rad(c)
