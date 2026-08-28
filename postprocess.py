@@ -49,7 +49,8 @@ def process_single_folder(folder_path):
             movement = drone_data.get('movement', 'Static').lower()
 
             if movement == 'dynamic':
-                folder_name = f"{distance}_{height}_{azimuth}_dynamic"
+                print(f"  ERROR: Dynamic movement not supported in {folder_path}, skipping")
+                return
             else:
                 rotation = drone_data.get('rotation', 'Front')
                 side_map = {"front": 1, "left": 2, "back": 3, "right": 4}
@@ -237,7 +238,8 @@ def split_recordings_by_folder(base_folder_path):
         movement = drone_data.get('movement', 'Static').lower()
 
         if movement == 'dynamic':
-            out_folder_name = f"{distance}_{height}_{azimuth}_dynamic"
+            print(f"  ERROR: Dynamic movement not supported in {raw_folder_name}, skipping")
+            continue
         else:
             rotation = drone_data.get('rotation', 'Front')
             side_map = {"front": 1, "left": 2, "back": 3, "right": 4}

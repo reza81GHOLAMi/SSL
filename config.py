@@ -31,6 +31,7 @@ config = {
     "lr_patience": 10,
     "test_split_ratio": 0.25,
     "split_seed": 42,
+    "audio_orig_freq": 96000,
 
     # Runtime defaults (overridden by main.py at startup)
     "checkpoint_path": "saved_models/default",

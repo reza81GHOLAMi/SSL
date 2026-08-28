@@ -104,7 +104,7 @@ class AudioSpectrogramDataset(Dataset):
 
         if feature_type == "stft":
             self.transform = nn.Sequential(
-                T.Resample(orig_freq=96000, new_freq=self.sample_rate),
+                T.Resample(orig_freq=self.cfg.get("audio_orig_freq", 96000), new_freq=self.sample_rate),
                 T.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
             )
 
