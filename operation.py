@@ -1,4 +1,5 @@
 import glob
+import math
 import os
 import random
 
@@ -74,6 +75,44 @@ def random_crop(audio, sample_rate, target_duration=1.0):
         start = random.randint(0, total_length - target_length)
         audio = audio[:, start:start + target_length]
     return audio
+
+
+# Canonical label vector layout shared by the dataset and the trainer:
+# [distance/50, height/50, hypotenuse/50, sin(az), cos(az), sin(side), cos(side)]
+CANONICAL_LABELS = ["distance", "height", "hypotenuse", "azimuth_sin", "azimuth_cos",
+                    "side_sin", "side_cos"]
+
+
+def build_target_spec(cfg):
+    """Ordered list of active regression targets given the use_* config flags.
+
+    Azimuth (sin/cos) is always active. Each name is a key into CANONICAL_LABELS,
+    so 'azimuth' expands to the azimuth_sin/azimuth_cos columns.
+    """
+    spec = []
+    if cfg.get("use_distance", True):
+        spec.append("distance")
+    if cfg.get("use_height", True):
+        spec.append("height")
+    if cfg.get("use_hypotenuse", False):
+        spec.append("hypotenuse")
+    spec.append("azimuth")
+    if cfg.get("use_side", True):
+        spec.append("side")
+    return spec
+
+
+def target_label_indices(cfg):
+    """Flat list of CANONICAL_LABELS indices covered by the active target spec."""
+    indices = []
+    for name in build_target_spec(cfg):
+        if name == "azimuth":
+            indices += [CANONICAL_LABELS.index("azimuth_sin"), CANONICAL_LABELS.index("azimuth_cos")]
+        elif name == "side":
+            indices += [CANONICAL_LABELS.index("side_sin"), CANONICAL_LABELS.index("side_cos")]
+        else:
+            indices.append(CANONICAL_LABELS.index(name))
+    return indices
 
 
 class AudioSpectrogramDataset(Dataset):
@@ -183,6 +222,7 @@ class AudioSpectrogramDataset(Dataset):
         if labels == ("none", "none", "none", "none"):
             a_normalized = 0.0
             b_normalized = 0.0
+            hyp_normalized = 0.0
             c_sin_normalized = 0.0
             c_cos_normalized = 0.0
             d_sin_normalized = 0.0
@@ -192,6 +232,7 @@ class AudioSpectrogramDataset(Dataset):
             try:
                 a_normalized = float(a) / 50.0  # Scaling 'a' to the range [0,1]
                 b_normalized = float(b) / 50.0  # Scaling 'b' to the range [0,1]
+                hyp_normalized = math.sqrt(float(a) ** 2 + float(b) ** 2) / 50.0  # Slant range
                 c = float(c)
                 d = int(d)  # Assuming that 'd' is an integer
             except ValueError:
@@ -220,8 +261,8 @@ class AudioSpectrogramDataset(Dataset):
             d_cos_normalized = (d_cos + 1.0) / 2.0
 
         labels_tensor = torch.tensor(
-            [a_normalized, b_normalized, c_sin_normalized, c_cos_normalized, d_sin_normalized,
-             d_cos_normalized], dtype=torch.float32)
+            [a_normalized, b_normalized, hyp_normalized, c_sin_normalized, c_cos_normalized,
+             d_sin_normalized, d_cos_normalized], dtype=torch.float32)
 
         try:
             waveform, sr = librosa.load(wav_path, sr=self.sample_rate, mono=False)
@@ -232,6 +273,9 @@ class AudioSpectrogramDataset(Dataset):
         # Checking number of channels
         if waveform.size(0) != 8:
             raise ValueError(f"Expected 8 channels, but found {waveform.size(0)} in file {wav_path}")
+
+        # Selecting microphone subset (0-based channel indices, see config["channels"])
+        waveform = waveform[self.cfg.get("channels", range(8)), :]
 
         if self.mode == 'train':
             # Trimming to the specified length only in training mode
@@ -324,7 +368,7 @@ if __name__ == "__main__":
     for i, data in tqdm(enumerate(train_dataloader), total=len(train_dataloader)):
         spectrograms, labels = data
         print(f"Spectrograms shape: {spectrograms.shape}")  # Expected shape: [1, 8, 128, 256]
-        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 6]
+        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 7]
         print(f"Labels: {labels}")
         plot_spectrograms(spectrograms)
         print(f"Max value: {torch.max(spectrograms)}, Min value: {torch.min(spectrograms)}")
@@ -335,7 +379,7 @@ if __name__ == "__main__":
     for i, data in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
         spectrograms, labels = data
         print(f"Spectrograms shape: {spectrograms.shape}")  # Expected shape: [1, 8, 128, 256]
-        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 6]
+        print(f"Labels shape: {labels.shape}")  # Expected shape: [1, 7]
         print(f"Labels: {labels}")
         plot_spectrograms(spectrograms)
         print(f"Max value: {torch.max(spectrograms)}, Min value: {torch.min(spectrograms)}")
