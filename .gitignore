@@ -33,3 +33,8 @@ checkpoints/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Run artifacts
+run_*.log
+results/
+saved_models/
