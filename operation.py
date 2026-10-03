@@ -142,10 +142,10 @@ class AudioSpectrogramDataset(Dataset):
         self.n_barks = self.cfg["n_barks"]
 
         if feature_type == "stft":
-            self.transform = nn.Sequential(
-                T.Resample(orig_freq=self.cfg.get("audio_orig_freq", 96000), new_freq=self.sample_rate),
-                T.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
-            )
+            # No Resample here: librosa.load(sr=...) already delivers audio at
+            # self.sample_rate, so resampling again stretched every stft run with
+            # sample_rate != audio_orig_freq (BUG-32 in the code notes)
+            self.transform = T.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
 
         elif feature_type == "lfcc":
             self.transform = T.LFCC(sample_rate=self.sample_rate, n_lfcc=self.n_lfcc,
