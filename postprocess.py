@@ -12,11 +12,13 @@ base_folder_path = config.get("base_folder_path", r"D:\microphone_array")
 processed_path = config.get("processed_path", r"D:\processed_datasets")
 divided_path = config.get("divided_path", r"D:\divided_datasets")
 
-# Derived output directories for train and test datasets
+# Derived output directories for train, validation and test datasets
 train_base_dir = os.path.join(processed_path, "train")
+val_base_dir = os.path.join(processed_path, "val")
 test_base_dir = os.path.join(processed_path, "test")
 os.makedirs(train_base_dir, exist_ok=True)
 os.makedirs(test_base_dir, exist_ok=True)
+os.makedirs(val_base_dir, exist_ok=True)
 
 def get_unique_folder_name(base_dir, folder_name):
     """Generate a unique folder name to avoid overwriting."""
@@ -157,9 +159,9 @@ def summarize_post_metadata(base_folder_path):
                 print(f"  {value}: {count}")
 
 def divide_files_to_new_structure(base_folder_path, new_base_path, step_train=500, clip_duration_train=1500, clip_duration_test=1000, total_clips_test=20):
-    for dataset_type in ['train', 'test']:
+    for dataset_type in ['train', 'val', 'test']:
         dataset_path = os.path.join(base_folder_path, dataset_type)
-        new_dataset_path = os.path.join(new_base_path, 'train' if dataset_type == 'train' else 'test')
+        new_dataset_path = os.path.join(new_base_path, dataset_type)
         os.makedirs(new_dataset_path, exist_ok=True)
 
         if not os.path.exists(dataset_path):
@@ -188,7 +190,7 @@ def divide_files_to_new_structure(base_folder_path, new_base_path, step_train=50
                             clip_file_name = f"clip_{start_ms}_{end_ms}.wav"
                             clip.export(os.path.join(new_folder_path, clip_file_name), format="wav")
 
-                    elif dataset_type == 'test':
+                    elif dataset_type in ('test', 'val'):
                         available_starts = range(0, duration_ms - clip_duration_test + 1, clip_duration_test)
                         random_starts = random.sample(list(available_starts), min(total_clips_test, len(available_starts)))
                         print(f"Processing folder {idx}/{total_folders} ({folder_name}): {len(random_starts)} test clips")
@@ -206,7 +208,10 @@ def divide_files_to_new_structure(base_folder_path, new_base_path, step_train=50
 def split_recordings_by_folder(base_folder_path):
     """Split recordings at the folder level (no data leakage).
     Groups recordings by (distance, height, azimuth), randomly assigns
-    one recording per group to test, rest to train.
+    one recording per group to test and (when make_val_split is enabled)
+    one to val, rest to train. Ambient recordings stay train-only: their
+    all-zeros label is a pseudo-target, not a position, so they would
+    distort validation/test localization metrics.
     """
     recordings = []
     ambient_recordings = []
@@ -262,13 +267,20 @@ def split_recordings_by_folder(base_folder_path):
         groups[rec['group_key']].append(rec)
 
     random.seed(config.get("split_seed", 42))
+    make_val = config.get("make_val_split", True)
 
     train_count = 0
+    val_count = 0
     test_count = 0
 
     for group_key, group_recordings in groups.items():
         test_recording = random.choice(group_recordings)
-        train_recordings = [r for r in group_recordings if r != test_recording]
+        remaining = [r for r in group_recordings if r != test_recording]
+
+        val_recording = None
+        if make_val and len(remaining) >= 2:
+            val_recording = random.choice(remaining)
+            remaining = [r for r in remaining if r != val_recording]
 
         test_folder_name = get_unique_folder_name(test_base_dir, test_recording['out_folder_name'])
         test_output_dir = os.path.join(test_base_dir, test_folder_name)
@@ -276,7 +288,14 @@ def split_recordings_by_folder(base_folder_path):
         shutil.copy2(test_recording['wav_path'], os.path.join(test_output_dir, "test_audio.wav"))
         test_count += 1
 
-        for rec in train_recordings:
+        if val_recording is not None:
+            val_folder_name = get_unique_folder_name(val_base_dir, val_recording['out_folder_name'])
+            val_output_dir = os.path.join(val_base_dir, val_folder_name)
+            os.makedirs(val_output_dir, exist_ok=True)
+            shutil.copy2(val_recording['wav_path'], os.path.join(val_output_dir, "val_audio.wav"))
+            val_count += 1
+
+        for rec in remaining:
             train_folder_name = get_unique_folder_name(train_base_dir, rec['out_folder_name'])
             train_output_dir = os.path.join(train_base_dir, train_folder_name)
             os.makedirs(train_output_dir, exist_ok=True)
@@ -292,6 +311,7 @@ def split_recordings_by_folder(base_folder_path):
 
     print(f"Recording-level split complete:")
     print(f"  Train recordings: {train_count}")
+    print(f"  Val recordings: {val_count}")
     print(f"  Test recordings: {test_count}")
     print(f"  Total groups: {len(groups)}")
     print(f"  Ambient (train only): {len(ambient_recordings)}")

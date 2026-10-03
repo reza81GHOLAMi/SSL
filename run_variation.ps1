@@ -30,7 +30,12 @@ param(
     [int]$Epochs,
 
     # Archive the run's checkpoints + results and start from scratch
-    [switch]$Reset
+    [switch]$Reset,
+
+    # Dataset root (must contain train\ [, val\] and test\). Default: config.py.
+    # Use D:\UNIFinalprojectYaser\h\divided_datasets for the local copy with the
+    # val split (train=68 / val=32 / test=32) made by make_validation_split.py.
+    [string]$DatasetPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -107,20 +112,29 @@ if ($pretrained) {
     Write-Host " Starting      : fresh training (no checkpoint found)"
 }
 Write-Host " Epochs        : $Epochs more -> total $totalEpochs"
-Write-Host " Results file  : $resultsFile (one line per test pass)"
+if ($DatasetPath -ne "") {
+    Write-Host " Dataset       : $DatasetPath"
+    Write-Host " Val split     : $(if (Test-Path (Join-Path $DatasetPath 'val')) {'YES -> best.pth by val_loss, test untouched (evaluate_test.py after)'} else {'no -> legacy test-driven mode'})"
+}
+Write-Host " Results file  : $resultsFile (one line per eval pass)"
 Write-Host "==============================================================="
 
 # --- Build the JSON override (replaces config['variations']) -----------------
 # Written to a temp file and passed via --json-file: PowerShell 5.1 mangles
 # embedded double quotes when passing JSON strings directly to native commands.
 $chJson = ($channels -join ",")
+$datasetJson = ""
+if ($DatasetPath -ne "") {
+    # Forward slashes so JSON stays valid without escaping backslashes
+    $datasetJson = ' "dataset_path": "{0}",' -f ($DatasetPath -replace '\\', '/')
+}
 $json = @"
 {"variations": [
     {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024,
      "n_mfcc": 0, "n_mels": 128, "n_lfcc": 0, "n_barks": 0,
      "channels": [$chJson], $targets}
  ],
- "epochs": $totalEpochs,
+ "epochs": $totalEpochs,$datasetJson
  "checkpoint_path": "saved_models/$runName",
  "pretrained": $($pretrained.ToString().ToLower()),
  "model_path": "$($modelPath -replace '\\', '/')",

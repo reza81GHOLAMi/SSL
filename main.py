@@ -25,8 +25,22 @@ def train_init(rank, cfg):
     training_loader = DataLoader(dataset_train, cfg["batch_size"], shuffle=True, drop_last=True, num_workers=cfg.get("num_workers", 2))
     test_loader = DataLoader(dataset_test, cfg["batch_size"], shuffle=False, drop_last=False, num_workers=cfg.get("num_workers", 2))
 
+    # Optional validation split: when <dataset_path>/val exists, per-epoch model
+    # selection and LR scheduling run on val instead of the test set (which is
+    # then only evaluated by evaluate_test.py after training).
+    val_loader = None
+    val_dir = os.path.join(cfg["dataset_path"], "val")
+    has_val = False
+    if os.path.isdir(val_dir):
+        with os.scandir(val_dir) as entries:
+            has_val = any(entries)
+    if has_val:
+        dataset_val = AudioSpectrogramDataset(cfg, mode="val")
+        val_loader = DataLoader(dataset_val, cfg["batch_size"], shuffle=False, drop_last=False, num_workers=cfg.get("num_workers", 2))
+        print(f"Validation split found: {len(dataset_val)} files -> used for epoch selection")
+
     print("Models initializaing")
-    trainer = Trainer(cfg, training_loader, test_loader)
+    trainer = Trainer(cfg, training_loader, test_loader, val_loader=val_loader)
 
     print("Models training")
     trainer.fit()

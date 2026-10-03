@@ -40,13 +40,19 @@ class Logger():
 
 
 class Trainer:
-    def __init__(self, cfg, loader, test_loader):
+    def __init__(self, cfg, loader, test_loader, val_loader=None):
         self.cfg = cfg
         self.cfg["device"] = torch.device(
             "cuda:{}".format(self.cfg["rank"])) if torch.cuda.is_available() else torch.device("cpu")
 
         self.loader = loader
         self.test_loader = test_loader
+        # Optional validation loader: when present, per-epoch model selection
+        # (best.pth), LR scheduling and the history CSV all run on val; the
+        # test set is then only evaluated by evaluate_test.py after training.
+        self.val_loader = val_loader
+        self.best_val_loss = float("inf")
+        self.best_epoch = 0
         if torch.cuda.is_available():
             self.scaler = torch.amp.GradScaler('cuda', enabled=self.cfg.get("use_grad", False))
         else:
@@ -114,24 +120,89 @@ class Trainer:
         return err.square().mean(dim=0).sum()
 
     def fit(self):
+        import time
         save_every = self.cfg.get("save_every_epochs", 5)
+        checkpoint_dir = self.cfg.get("checkpoint_path", "saved_models/default")
+        # Resume the best-val tracking from an existing best.pth of this run
+        best_ckpt_path = os.path.join(checkpoint_dir, "best.pth")
+        if self.best_val_loss == float("inf") and os.path.isfile(best_ckpt_path):
+            try:
+                prev = torch.load(best_ckpt_path, weights_only=False, map_location="cpu")
+                self.best_val_loss = prev.get("val_loss", float("inf"))
+            except Exception as e:
+                print(f"Could not read previous best.pth val_loss: {e}")
+
         for epoch in range(self.epoch, self.cfg["epochs"]):
             print(f"Starting epoch {epoch + 1}/{self.cfg['epochs']}")
-            self.test_loop(epoch)
-            self.training_loop(epoch)
+            t0 = time.time()
+            if self.val_loader is not None:
+                train_loss = self.training_loop(epoch)
+                val_loss, val_metrics = self.evaluate_loop(epoch, self.val_loader, split="val")
+                self.scheduler.step(val_loss)
+                lr = self.opt_Segm.param_groups[0]["lr"]
+                self._append_history(epoch + 1, train_loss, val_loss, val_metrics, lr,
+                                     time.time() - t0)
+                if val_loss < self.best_val_loss:
+                    self.best_val_loss = val_loss
+                    self.best_epoch = epoch + 1
+                    self.save_checkpoint(epoch + 1, self.segmentate, self.opt_Segm, self.scaler,
+                                         best_ckpt_path, val_loss=val_loss)
+                    print(f"New best val_loss {val_loss:.6f} -> saved {best_ckpt_path}")
+            else:
+                # Legacy behavior: evaluate on the test set each epoch
+                self.test_loop(epoch)
+                self.training_loop(epoch)
 
             if save_every > 0 and (epoch + 1) % save_every == 0 and epoch + 1 < self.cfg["epochs"]:
                 self.save_checkpoint(epoch + 1, self.segmentate, self.opt_Segm, self.scaler,
-                    f"{self.cfg.get('checkpoint_path', 'saved_models/default')}/{epoch + 1}_checkpoint.pth")
+                    f"{checkpoint_dir}/{epoch + 1}_checkpoint.pth")
 
-        # Post-training test so the results file records the metrics of the
-        # weights this run actually produced (test_loop otherwise runs only
-        # at the start of each epoch, i.e. before that epoch's training).
-        self.test_loop(self.cfg["epochs"])
+        if self.val_loader is not None:
+            # Test set is intentionally NOT evaluated here — use evaluate_test.py
+            # after training for the final test metrics.
+            pass
+        else:
+            # Post-training test so the results file records the metrics of the
+            # weights this run actually produced (test_loop otherwise runs only
+            # at the start of each epoch, i.e. before that epoch's training).
+            self.test_loop(self.cfg["epochs"])
 
         # Always save at the end of training so short runs still produce a resumable checkpoint
+        final_path = f"{checkpoint_dir}/{self.cfg['epochs']}_final.pth"
+        best_is_final = (self.val_loader is not None and self.best_epoch == self.cfg["epochs"])
         self.save_checkpoint(self.cfg["epochs"], self.segmentate, self.opt_Segm, self.scaler,
-            f"{self.cfg.get('checkpoint_path', 'saved_models/default')}/{self.cfg['epochs']}_final.pth")
+            final_path, val_loss=self.best_val_loss if best_is_final else None)
+
+        if best_is_final and os.path.exists(best_ckpt_path):
+            # Last epoch is also the best: avoid a second ~232 MB copy — make
+            # best.pth a hardlink to the final checkpoint (both names must
+            # exist: resume scans N_final.pth, evaluate_test.py prefers best.pth).
+            try:
+                os.remove(best_ckpt_path)
+                os.link(final_path, best_ckpt_path)
+                print(f"Best epoch == final epoch ({self.best_epoch}): "
+                      f"best.pth is a hardlink to {final_path}")
+            except OSError as e:
+                # Filesystem can't hardlink — keep a real copy instead
+                print(f"Hardlink failed ({e}), saving best.pth as a separate copy")
+                self.save_checkpoint(self.cfg["epochs"], self.segmentate, self.opt_Segm,
+                                     self.scaler, best_ckpt_path, val_loss=self.best_val_loss)
+
+    def _append_history(self, epoch, train_loss, val_loss, metrics, lr, elapsed):
+        """Append one per-epoch row to <checkpoint_path>/history.csv — everything
+        needed to plot epoch curves and locate the best epoch afterwards."""
+        history_file = os.path.join(self.cfg.get("checkpoint_path", "saved_models/default"),
+                                    "history.csv")
+        os.makedirs(os.path.dirname(history_file) or ".", exist_ok=True)
+        metric_keys = list(metrics.keys())
+        new_file = not os.path.exists(history_file)
+        with open(history_file, "a", newline="") as f:
+            if new_file:
+                f.write("epoch\ttrain_loss\tval_loss\t" + "\t".join(metric_keys)
+                        + "\tlr\telapsed_seconds\n")
+            f.write(f"{epoch}\t{train_loss:.6f}\t{val_loss:.6f}\t"
+                    + "\t".join(f"{metrics[k]:.6f}" for k in metric_keys)
+                    + f"\t{lr:.8g}\t{elapsed:.1f}\n")
 
     def _rng_state(self):
         return {
@@ -146,7 +217,7 @@ class Trainer:
         files = getattr(loader.dataset, "file_paths", None)
         return list(files) if files is not None else None
 
-    def save_checkpoint(self, EPOCH, classifier, optimizer, scaler, PATH):
+    def save_checkpoint(self, EPOCH, classifier, optimizer, scaler, PATH, val_loss=None):
         if isinstance(classifier, torch.nn.DataParallel):
             model_state_dict_enc = classifier.module.state_dict()
         else:
@@ -159,6 +230,7 @@ class Trainer:
             "train_files": self._dataset_files(self.loader),
             "test_files": self._dataset_files(self.test_loader),
             "run_name": self.cfg.get("run_name"),
+            "val_loss": val_loss,
         }, PATH, )
 
     def update_loss_buffer(self, loss):
@@ -174,6 +246,8 @@ class Trainer:
     def training_loop(self, epoch):
         self.segmentate.train()
         self.loss_buffer = []
+        epoch_loss_sum = 0.0
+        epoch_batches = 0
 
         for iteration, data in enumerate(tqdm(self.loader, desc=f"Training Epoch {epoch + 1}")):
             data_to_log = {"Graph": {}, "Print": {}, "Image": {}, "Audio": {}}
@@ -205,6 +279,8 @@ class Trainer:
 
             # Updating the loss buffer
             avg_loss = self.update_loss_buffer(Loss.item())
+            epoch_loss_sum += Loss.item()
+            epoch_batches += 1
 
             # Logging losses and accuracy
             data_to_log["Graph"]["Total_Loss"] = Loss.item()
@@ -218,7 +294,14 @@ class Trainer:
 
             self.logger.step(data_to_log)
 
+        return epoch_loss_sum / epoch_batches if epoch_batches else 0.0
+
     def test_loop(self, epoch):
+        avg_loss, metrics = self.evaluate_loop(epoch, self.test_loader, split="test")
+        self.scheduler.step(avg_loss)
+        return avg_loss, metrics
+
+    def evaluate_loop(self, epoch, loader, split="test"):
         self.segmentate.eval()
         test_loss_total = 0.0
         # Metric suffix per target, kept compatible with the legacy a/b/c/d naming
@@ -242,7 +325,7 @@ class Trainer:
             col += n
 
         with torch.no_grad():
-            for iteration, data in enumerate(tqdm(self.test_loader, desc=f"Testing Epoch {epoch + 1}")):
+            for iteration, data in enumerate(tqdm(loader, desc=f"Evaluating ({split}) Epoch {epoch + 1}")):
                 input_spec_tensor, mask = (tensor.to(self.cfg["device"]).float() for tensor in data)
                 out = self.segmentate(input_spec_tensor)
                 loss = self.compute_loss(out, mask)
@@ -304,13 +387,11 @@ class Trainer:
                 total_samples += batch_size
 
         if total_samples == 0:
-            print("No test data")
-            return
+            print(f"No {split} data")
+            return None, None
 
         # Calculating final metrics
         avg_test_loss = test_loss_total / total_samples
-
-        self.scheduler.step(avg_test_loss)
 
         metrics = {}
         for name in self.target_spec:
@@ -322,11 +403,12 @@ class Trainer:
             metrics["RMSE_3D"] = (total_3d_mse / total_samples) ** 0.5
 
         # Logowanie wyników
-        data_to_log = {"Graph": {"Test_Loss": avg_test_loss, **metrics},
-            "Print": {"Test_Epoch": epoch + 1, "Test_Loss": avg_test_loss, **metrics}, "Image": {}, "Audio": {}}
+        split_label = split.capitalize()
+        data_to_log = {"Graph": {f"{split_label}_Loss": avg_test_loss, **metrics},
+            "Print": {f"{split_label}_Epoch": epoch + 1, f"{split_label}_Loss": avg_test_loss, **metrics}, "Image": {}, "Audio": {}}
 
         self.logger.step(data_to_log)
-        print(f"\nEpoch {epoch + 1} - Test results:")
+        print(f"\nEpoch {epoch + 1} - {split_label} results:")
         print(f"Loss: {avg_test_loss:.4f}")
         for name in self.target_spec:
             sfx = suffix_map[name]
@@ -335,7 +417,7 @@ class Trainer:
             print(f"MAE 3D position (true Euclidean): {metrics['MAE_3D']:.4f} ± {metrics['RMSE_3D']:.4f} m")
         print()
 
-        # Append one line per test to the run's results file (config["results_file"])
+        # Append one line per evaluation to the run's results file (config["results_file"])
         results_file = self.cfg.get("results_file")
         if results_file:
             os.makedirs(os.path.dirname(results_file) or ".", exist_ok=True)
@@ -343,8 +425,10 @@ class Trainer:
             with open(results_file, "a", newline="") as f:
                 metric_keys = list(metrics.keys())
                 if new_file:
-                    f.write("timestamp\trun_name\tepoch\ttest_loss\t"
+                    f.write("timestamp\trun_name\tepoch\tsplit\tloss\t"
                             + "\t".join(metric_keys) + "\n")
                 f.write(f"{datetime.now().isoformat(timespec='seconds')}\t"
-                        f"{self.cfg.get('run_name')}\t{epoch}\t{avg_test_loss:.6f}\t"
+                        f"{self.cfg.get('run_name')}\t{epoch}\t{split}\t{avg_test_loss:.6f}\t"
                         + "\t".join(f"{metrics[k]:.6f}" for k in metric_keys) + "\n")
+
+        return avg_test_loss, metrics

@@ -198,6 +198,9 @@ class AudioSpectrogramDataset(Dataset):
 
         if self.mode == 'train':
             self.data_dir = os.path.join(self.root_dir, 'train')
+        elif self.mode == 'val':
+            # Validation split: test-like pipeline (no augmentation)
+            self.data_dir = os.path.join(self.root_dir, 'val')
         else:
             self.data_dir = os.path.join(self.root_dir, 'test')
         self.classes = []
