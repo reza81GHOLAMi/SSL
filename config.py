@@ -14,7 +14,7 @@ config = {
     # Model
     "pretrained": False,
     "model_path": 'saved_models/2025_01_10_14_35_08_/115_end_unet.pth',
-    "feature_type": "lfcc",  # Options: "mel", "stft", "mfcc", "bark", "lfcc"
+    "feature_type": "lfcc",  # Options: "mel", "stft", "mfcc", "bark", "lfcc", "rainbow"
     "lr": 0.0002,
     "epochs": 100,
     # Regression targets included in the model head / loss / metrics.
@@ -25,6 +25,19 @@ config = {
     "use_hypotenuse": False,
     # Side (d outputs, drone yaw orientation) excluded from loss/metrics when False
     "use_side": False,
+    # Stack inter-channel IPD (sin/cos) + ILD maps after the mel channels
+    "use_ipd": False,
+    # Append the per-mic temporal delta of the mel spectrogram. Layout options:
+    # "channel" = extra input channels (static + delta aligned per pixel; doubles
+    #   conv_in inputs, ~<0.1% more params — NOT strictly parameter-matched)
+    # "freq" = stacked along the frequency/height rows (static rows on top,
+    #   delta rows below; parameter-matched, but 2x-downsamples mel rows on
+    #   256-mel configs when resized to 256 height)
+    # "time" = static left / delta right halves (the original layout; kept for
+    #   reproducing the dlt014/dlt0257 runs)
+    "use_delta": False,
+    "delta_win": 9,
+    "delta_layout": "channel",
     "batch_size": 32,
     "save_every_epochs": 5,
 
@@ -129,11 +142,17 @@ config = {
         # {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 512, "n_mfcc": 0, "n_mels": 128,
         #  "n_lfcc": 0, "n_barks": 0},
         # 3-mic ablation: NE upper + N/E lower (indices 4, 0, 1)
-        {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024, "n_mfcc": 0, "n_mels": 128,
-         "n_lfcc": 0, "n_barks": 0, "channels": [4, 0, 1]},
+        # {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024, "n_mfcc": 0, "n_mels": 128,
+        #  "n_lfcc": 0, "n_barks": 0, "channels": [4, 0, 1]},
         # 3-mic ablation: SW upper + N/E lower (indices 6, 1, 0)
-        {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024, "n_mfcc": 0, "n_mels": 128,
-         "n_lfcc": 0, "n_barks": 0, "channels": [6, 1, 0]},
+        # {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024, "n_mfcc": 0, "n_mels": 128,
+        #  "n_lfcc": 0, "n_barks": 0, "channels": [6, 1, 0]},
+        # Rainbowgram input (DDSP-style): per mic one log-magnitude + one
+        # instantaneous-frequency map from STFT phase -> 2 channels per mic
+        # (16 for the full array). Matches the 8-mic mel base run's
+        # 96k/4096/2048 config for a feature-only comparison.
+        {"feature_type": "rainbow", "sample_rate": 96000, "n_fft": 4096, "hop_length": 2048, "n_mfcc": 0, "n_mels": 0,
+         "n_lfcc": 0, "n_barks": 0},
         # {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 512, "n_mfcc": 0, "n_mels": 256,
         #  "n_lfcc": 0, "n_barks": 0},
         # {"feature_type": "mel", "sample_rate": 96000, "n_fft": 2048, "hop_length": 1024, "n_mfcc": 0, "n_mels": 256,
