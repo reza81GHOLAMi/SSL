@@ -58,7 +58,17 @@ class Trainer:
         self.target_spec = build_target_spec(self.cfg)
         self.target_indices = target_label_indices(self.cfg)
 
-        self.segmentate = Classifier(channel_in=len(self.cfg.get("channels", range(8))),
+        n_mics = len(self.cfg.get("channels", range(8)))
+        # Rainbowgram features double the per-mic block (magnitude + IF map);
+        # IPD/ILD pair count always derives from the mic count
+        n_channels = 2 * n_mics if self.cfg.get("feature_type") == "rainbow" else n_mics
+        # Channel-layout delta doubles the input channels (~<0.1% more params
+        # in conv_in); freq/time layouts stack spatially and stay parameter-matched
+        if self.cfg.get("use_delta", False) and self.cfg.get("delta_layout", "channel") == "channel":
+            n_channels *= 2
+        if self.cfg.get("use_ipd", False):
+            n_channels += 3 * (n_mics * (n_mics - 1) // 2)
+        self.segmentate = Classifier(channel_in=n_channels,
                                      num_classes=len(self.target_indices)).to(self.cfg["device"])
 
         self.logger = Logger(cfg)

@@ -92,6 +92,16 @@ if __name__ == "__main__":
             "S" if updated_config.get("use_side", True) else "-",
         ])
         updated_config["run_name"] += f"_t{target_flags}"
+        if updated_config.get("use_delta", False):
+            # Window + layout tag keep delta runs in distinct checkpoint dirs
+            # (_dlt9 = channel layout, _dlt9f = freq, _dlt9t = time; the old
+            # time-stacked runs used a bare _dlt suffix)
+            updated_config["run_name"] += f"_dlt{updated_config.get('delta_win', 9)}"
+            layout = updated_config.get("delta_layout", "channel")
+            if layout in ("freq", "time"):
+                updated_config["run_name"] += layout[0]
+        if updated_config.get("use_ipd", False):
+            updated_config["run_name"] += "_ipd"
 
         # Checkpoints always live in saved_models/<run_name>/ — set per variation
         # so a stale "checkpoint_path" key cannot redirect them (BUG-30)

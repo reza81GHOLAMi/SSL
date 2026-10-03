@@ -1,4 +1,5 @@
 import glob
+import itertools
 import math
 import os
 import random
@@ -10,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio.transforms as T
+from torchaudio.functional import compute_deltas
 try:
     import torchaudio.prototype.transforms as PT
 except (ModuleNotFoundError, ImportError):
@@ -132,6 +134,7 @@ class AudioSpectrogramDataset(Dataset):
         self.height = self.cfg.get("height", 128)
         self.amplitude_to_db = T.AmplitudeToDB(stype='power', top_db=80)
         feature_type = self.cfg.get("feature_type", "mel")  # Default to Mel Spectrogram
+        self.feature_type = feature_type
 
         self.sample_rate = self.cfg["sample_rate"]
         self.n_mels = self.cfg["n_mels"]
@@ -141,11 +144,34 @@ class AudioSpectrogramDataset(Dataset):
         self.n_lfcc = self.cfg["n_lfcc"]
         self.n_barks = self.cfg["n_barks"]
 
+        # Inter-channel spatial features (IPD/ILD), stacked after the mel channels
+        self.use_ipd = self.cfg.get("use_ipd", False)
+        # Temporal delta (Δ) of the mel spectrogram per mic. delta_layout picks
+        # the stacking axis: "channel" = extra input channels (Δ of a (f, t)
+        # cell aligned with its static value from the first conv on),
+        # "freq" = Δ rows below the static rows, "time" = Δ half right of the
+        # static half (original dlt014/dlt0257 layout)
+        self.use_delta = self.cfg.get("use_delta", False)
+        self.delta_win = self.cfg.get("delta_win", 9)
+        delta_layouts = {"channel": 0, "freq": 1, "time": 2}
+        self.delta_layout = self.cfg.get("delta_layout", "channel")
+        if self.delta_layout not in delta_layouts:
+            raise RuntimeError(f"Unknown delta_layout '{self.delta_layout}' "
+                               f"(expected one of {sorted(delta_layouts)})")
+        self.delta_dim = delta_layouts[self.delta_layout]
+        self.ipd_pairs = list(itertools.combinations(range(len(self.cfg.get("channels", range(8)))), 2))
+        if self.use_ipd or feature_type == "rainbow":
+            self.stft_window = torch.hann_window(self.n_fft)
+
         if feature_type == "stft":
             # No Resample here: librosa.load(sr=...) already delivers audio at
             # self.sample_rate, so resampling again stretched every stft run with
             # sample_rate != audio_orig_freq (BUG-32 in the code notes)
             self.transform = T.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length)
+        elif feature_type == "rainbow":
+            # Rainbowgram input: the magnitude + instantaneous-frequency maps need
+            # the complex STFT (phase), computed in _rainbowgram during __getitem__
+            self.transform = None
 
         elif feature_type == "lfcc":
             self.transform = T.LFCC(sample_rate=self.sample_rate, n_lfcc=self.n_lfcc,
@@ -215,6 +241,34 @@ class AudioSpectrogramDataset(Dataset):
 
     def __len__(self):
         return len(self.file_paths)
+
+    def _rainbowgram(self, waveform):
+        """Rainbowgram input maps (term after Engel et al. 2020, DDSP): per mic one
+        log-magnitude map (the brightness of the visualization) plus one
+        instantaneous-frequency map (its hue). Returns [2C, n_fft//2+1, T] with
+        all C magnitude channels first, then the C IF channels — same block
+        order as the IPD/ILD maps. Magnitude is power-dB with top_db=80 like
+        the mel path, min-max normalized over the whole stack. IF is the
+        phase-vocoder deviation from the bin center, scaled so [0, 1] spans
+        the unambiguous range of +/- n_fft/(2*hop_length) bins around each
+        bin center (0.5 = energy at the center); bins floored by
+        top_db carry no reliable phase and get the neutral 0.5."""
+        spec = torch.stft(waveform, n_fft=self.n_fft, hop_length=self.hop_length,
+                          window=self.stft_window, center=True, return_complex=True)  # [C, F, T]
+        mag_db = self.amplitude_to_db(spec.abs().pow(2))
+        mag = (mag_db - mag_db.min()) / (mag_db.max() - mag_db.min() + 1e-9)
+
+        # Heterodyned phase increment minus the advance of a tone sitting at the
+        # bin center, wrapped to [-pi, pi]. Divided by 2*pi it is the deviation
+        # as a fraction of the unambiguous +/-n_fft/(2*hop_length)-bin range,
+        # so +0.5 maps it to [0, 1] with 0.5 = at the bin center.
+        dphi = torch.angle(spec[..., 1:] * torch.conj(spec[..., :-1]))
+        bins = torch.arange(spec.size(-2), dtype=dphi.dtype)
+        expected = (2 * math.pi * self.hop_length * bins / self.n_fft).view(1, -1, 1)
+        dev = torch.remainder(dphi - expected + math.pi, 2 * math.pi) - math.pi
+        dev = torch.nn.functional.pad(dev / (2 * math.pi), (1, 0)) + 0.5  # frame 0 = neutral
+        dev = torch.where(mag_db > mag_db.max() - 80.0, dev, torch.full_like(dev, 0.5))
+        return torch.cat([mag, dev], dim=0)
 
     def __getitem__(self, idx):
         wav_path = self.file_paths[idx]
@@ -292,32 +346,75 @@ class AudioSpectrogramDataset(Dataset):
         # Normalization
         waveform = (waveform - waveform.mean()) / (waveform.std() + 1e-9)
 
-        # Generating spectrograms for each channel
-        mel_spectrograms = []
-        for channel in waveform:
-            mel_spec = self.transform(channel)
-            mel_spec_db = self.amplitude_to_db(mel_spec)
-            mel_spectrograms.append(mel_spec_db)
+        if self.use_ipd:
+            spec = torch.stft(waveform, n_fft=self.n_fft, hop_length=self.hop_length,
+                              window=self.stft_window, center=True, return_complex=True)
 
-        # Stacking spectrograms into a single tensor [8, n_mels, time_frames]
-        spectrograms = torch.stack(mel_spectrograms, dim=0)  # Shape: [8, n_mels, time_frames]
+        if self.feature_type == "rainbow":
+            spectrograms = self._rainbowgram(waveform)  # [2C, F, T], already in [0, 1]
+        else:
+            # Generating spectrograms for each channel
+            mel_spectrograms = []
+            for channel in waveform:
+                mel_spec = self.transform(channel)
+                mel_spec_db = self.amplitude_to_db(mel_spec)
+                mel_spectrograms.append(mel_spec_db)
 
-        # Normalizing spectrograms to the range [0, 1]
-        spectrograms = (spectrograms - spectrograms.min()) / (spectrograms.max() - spectrograms.min() + 1e-9)
+            # Stacking spectrograms into a single tensor [8, n_mels, time_frames]
+            spectrograms = torch.stack(mel_spectrograms, dim=0)  # Shape: [8, n_mels, time_frames]
 
-        # Transposing from [C, H, W] to [H, W, C] for image transformations
-        spectrograms_np = spectrograms.permute(1, 2, 0).cpu().numpy()  # Shape: [n_mels, time_frames, 8]
+            # Normalizing spectrograms to the range [0, 1]
+            spectrograms = (spectrograms - spectrograms.min()) / (spectrograms.max() - spectrograms.min() + 1e-9)
 
-        # Applying image augmentations
-        if self.image_transform:
-            augmented = self.image_transform(image=spectrograms_np)
-            spectrograms_np = augmented['image']  # Shape: [height, width, 8]
+        if self.use_delta:
+            # Per-mic temporal delta appended along the delta_layout axis:
+            # channel -> [2C, n_mels, T] (Δ aligned with its static value per
+            # pixel; conv_in inputs double, ~<0.1% more params);
+            # freq -> [C, 2*n_mels, T] (static rows on top, Δ rows below;
+            # parameter-matched, but the resize 2x-downsamples mel rows on
+            # 256-mel configs); time -> [C, n_mels, 2T] (static left, Δ right;
+            # the original dlt014/dlt0257 layout, parameter-matched).
+            # Regression delta keeps the frame count (replicate padding), so
+            # both halves get equal size along the stacking axis after the
+            # resize. Delta is symmetric-normalized so zero-change maps to
+            # 0.5 — a joint min-max would drag negative deltas across the
+            # whole range and squeeze the static part.
+            delta = torch.stack([compute_deltas(ch, win_length=self.delta_win)
+                                 for ch in spectrograms], dim=0)
+            delta = (delta / (delta.abs().max() + 1e-9) + 1.0) / 2.0
+            spectrograms = torch.nn.functional.interpolate(
+                torch.cat([spectrograms, delta], dim=self.delta_dim).unsqueeze(0),
+                size=(self.height, self.width), mode="bilinear",
+                align_corners=False).squeeze(0).clamp(0.0, 1.0)
+        else:
+            # Transposing from [C, H, W] to [H, W, C] for image transformations
+            spectrograms_np = spectrograms.permute(1, 2, 0).cpu().numpy()  # Shape: [n_mels, time_frames, 8]
 
-        # Transposing back to [C, H_new, W_new]
-        spectrograms_np = spectrograms_np.transpose(2, 0, 1)  # Shape: [8, height, width]
+            # Applying image augmentations
+            if self.image_transform:
+                augmented = self.image_transform(image=spectrograms_np)
+                spectrograms_np = augmented['image']  # Shape: [height, width, 8]
 
-        # Converting to tensors
-        spectrograms = torch.tensor(spectrograms_np, dtype=torch.float32)  # Shape: [8, height, width]
+            # Transposing back to [C, H_new, W_new]
+            spectrograms_np = spectrograms_np.transpose(2, 0, 1)  # Shape: [8, height, width]
+
+            # Converting to tensors
+            spectrograms = torch.tensor(spectrograms_np, dtype=torch.float32)  # Shape: [8, height, width]
+
+        if self.use_ipd:
+            # Spatial feature maps per mic pair: sin(IPD), cos(IPD), ILD(dB)
+            spatial = []
+            for i, j in self.ipd_pairs:
+                ipd = torch.angle(spec[i] * torch.conj(spec[j]))
+                spatial.append((torch.sin(ipd) + 1.0) / 2.0)
+                spatial.append((torch.cos(ipd) + 1.0) / 2.0)
+                ild = 20.0 * torch.log10(spec[i].abs() + 1e-9) - 20.0 * torch.log10(spec[j].abs() + 1e-9)
+                spatial.append((ild.clamp(-40.0, 40.0) + 40.0) / 80.0)
+            spatial = torch.stack(spatial, dim=0)  # [3*n_pairs, n_fft/2+1, T]
+            spatial = torch.nn.functional.interpolate(
+                spatial.unsqueeze(0), size=(self.height, self.width),
+                mode="bilinear", align_corners=False).squeeze(0).clamp(0.0, 1.0)
+            spectrograms = torch.cat([spectrograms, spatial], dim=0)
 
         return spectrograms, labels_tensor
 
